@@ -20,3 +20,17 @@ type Credentials struct {
 func (Credentials) TableName() string {
 	return "auth.credentials"
 }
+
+// RefreshToken maps to auth.refresh_tokens table
+type RefreshToken struct {
+	ID        int64     `gorm:"primaryKey;column:id;autoIncrement"`
+	UserID    uuid.UUID `gorm:"type:uuid;column:user_id;index"`
+	Token     string    `gorm:"type:text;uniqueIndex;not null"`
+	Revoked   bool      `gorm:"default:false"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
+}
+
+func (RefreshToken) TableName() string {
+	return "auth.refresh_tokens"
+}

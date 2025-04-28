@@ -13,9 +13,10 @@ import (
 // JWT_SECRET=JDzpylXX5knaUuHa4z3y1s9AnNF56jXL/50zGTUyCLI=
 
 type Config struct {
-	PostgresDSN string
-	JwtSecret   string
-	Port        string
+	PostgresDSN           string
+	JwtSecret             string
+	JwtRefreshTokenSecret string
+	Port                  string
 }
 
 var Cfg *Config
@@ -30,9 +31,10 @@ func LoadConfig() error {
 	}
 
 	config := &Config{
-		PostgresDSN: viper.GetString("POSTGRES_DSN"),
-		JwtSecret:   viper.GetString("JWT_SECRET"),
-		Port:        viper.GetString("PORT"),
+		PostgresDSN:           viper.GetString("POSTGRES_DSN"),
+		JwtSecret:             viper.GetString("JWT_SECRET"),
+		JwtRefreshTokenSecret: viper.GetString("JWT_REFRESH_TOKEN_SECRET"),
+		Port:                  viper.GetString("PORT"),
 	}
 
 	if config.PostgresDSN == "" {
@@ -41,6 +43,10 @@ func LoadConfig() error {
 
 	if config.JwtSecret == "" {
 		return errors.New("JWT_SECRET is not set")
+	}
+
+	if config.JwtRefreshTokenSecret == "" {
+		return errors.New("JWT_REFRESH_TOKEN_SECRET is not set")
 	}
 
 	if config.Port == "" {

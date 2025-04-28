@@ -8,6 +8,7 @@ import (
 
 	"github.com/JackZhao98/balloonia-server/config"
 	"github.com/JackZhao98/balloonia-server/internal/auth"
+	"github.com/JackZhao98/balloonia-server/internal/auth/jwt"
 	"github.com/JackZhao98/balloonia-server/internal/db"
 	"github.com/gin-gonic/gin"
 )
@@ -24,8 +25,12 @@ func main() {
 
 	db.ConnectDatabase()
 
+	// 初始化 JWT 服务
+	jwtService := jwt.NewService()
+
+	// 初始化认证服务
 	authRepo := auth.NewRepository(db.DB)
-	authSvc := auth.NewService(authRepo)
+	authSvc := auth.NewService(authRepo, jwtService)
 	authH := auth.NewHandler(authSvc)
 
 	router := gin.Default()
@@ -35,7 +40,7 @@ func main() {
 		c.Redirect(http.StatusMovedPermanently, "/docs/index.html")
 	})
 
-	api := router.Group("/")
-	auth.RegisterRoutes(api, authH)
+	// 注册路由
+	auth.RegisterRoutes(router, *authH, jwtService)
 	router.Run(":" + config.Get().Port)
 }

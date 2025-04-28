@@ -6,6 +6,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// @title Balloonia API
+// @version 1.0
+// @description This is the Balloonia server API documentation
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
+
 // Handler bundles auth routes
 type Handler struct {
 	Service Service
@@ -61,6 +69,32 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 	resp, err := h.Service.Login(c.Request.Context(), in)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// RefreshToken godoc
+// @Summary Refresh access token
+// @Description Get a new access token using refresh token
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body RefreshTokenRequest true "Refresh token"
+// @Success 200 {object} AuthResponse
+// @Failure 400 {object} error
+// @Failure 401 {object} error
+// @Failure 500 {object} error
+// @Router /auth/refresh [post]
+func (h *Handler) RefreshToken(c *gin.Context) {
+	var in RefreshTokenRequest
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := h.Service.RefreshToken(c.Request.Context(), in.RefreshToken)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 		return

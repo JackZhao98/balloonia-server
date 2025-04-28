@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/JackZhao98/balloonia-server/config"
+	"github.com/JackZhao98/balloonia-server/internal/auth/jwt"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
@@ -15,18 +15,23 @@ import (
 type Service interface {
 	Register(ctx context.Context, in RegisterRequest) (*AuthResponse, error)
 	Login(ctx context.Context, in LoginRequest) (*AuthResponse, error)
+	RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error)
 }
 
 type service struct {
-	repo Repository
+	repo       Repository
+	jwtService jwt.Service
 }
 
 // NewService creates a new Auth Service
-func NewService(r Repository) Service {
-	return &service{repo: r}
+func NewService(r Repository, jwtService jwt.Service) Service {
+	return &service{
+		repo:       r,
+		jwtService: jwtService,
+	}
 }
+
 func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthResponse, error) {
-	// 先尝试查找邮箱是否已存在
 	_, err := s.repo.FindByEmail(ctx, in.Email)
 	if err == nil {
 		return nil, errors.New("email already registered")
@@ -36,13 +41,11 @@ func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthRespon
 		return nil, err
 	}
 
-	// 生成密码哈希
 	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
-	// 构造模型并写入
 	cred := &Credentials{
 		Email:        in.Email,
 		PasswordHash: string(hash),
@@ -52,10 +55,31 @@ func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthRespon
 		return nil, err
 	}
 
-	// 生成并返回 JWT（替换下面这行）
-	token := config.Get().JwtSecret
-	return &AuthResponse{UserID: cred.UserID.String(), Token: token}, nil
+	// 先物理删除该用户所有refresh token
+	_ = s.repo.DeleteAllUserTokens(ctx, cred.UserID.String())
+
+	accessToken, err := s.jwtService.GenerateAccessToken(cred.UserID.String())
+	if err != nil {
+		return nil, err
+	}
+	refreshToken, err := s.jwtService.GenerateRefreshToken(cred.UserID.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateRefreshToken(ctx, &RefreshToken{
+		UserID: cred.UserID,
+		Token:  refreshToken,
+	}); err != nil {
+		return nil, err
+	}
+
+	return &AuthResponse{
+		UserID:       cred.UserID.String(),
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
 }
+
 func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, error) {
 	cred, err := s.repo.FindByEmail(ctx, in.Email)
 	if err != nil {
@@ -64,6 +88,68 @@ func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, er
 	if err := bcrypt.CompareHashAndPassword([]byte(cred.PasswordHash), []byte(in.Password)); err != nil {
 		return nil, errors.New("invalid credentials")
 	}
-	token := "..." // generate JWT
-	return &AuthResponse{UserID: cred.UserID.String(), Token: token}, nil
+
+	// 先物理删除该用户所有refresh token
+	_ = s.repo.DeleteAllUserTokens(ctx, cred.UserID.String())
+
+	accessToken, err := s.jwtService.GenerateAccessToken(cred.UserID.String())
+	if err != nil {
+		return nil, err
+	}
+	refreshToken, err := s.jwtService.GenerateRefreshToken(cred.UserID.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateRefreshToken(ctx, &RefreshToken{
+		UserID: cred.UserID,
+		Token:  refreshToken,
+	}); err != nil {
+		return nil, err
+	}
+
+	return &AuthResponse{
+		UserID:       cred.UserID.String(),
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error) {
+	// 查找并校验 refresh token 是否有效且未撤销
+	_, err := s.repo.FindRefreshToken(ctx, refreshToken)
+	if err != nil {
+		return nil, errors.New("invalid refresh token")
+	}
+	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
+	if err != nil {
+		return nil, errors.New("invalid refresh token")
+	}
+
+	accessToken, err := s.jwtService.GenerateAccessToken(claims.Subject)
+	if err != nil {
+		return nil, err
+	}
+	newRefreshToken, err := s.jwtService.GenerateRefreshToken(claims.Subject)
+	if err != nil {
+		return nil, err
+	}
+	// 先物理删除该用户所有refresh token
+	userUUID, err := uuid.Parse(claims.Subject)
+	if err != nil {
+		return nil, err
+	}
+	_ = s.repo.DeleteAllUserTokens(ctx, userUUID.String())
+	// 存储新的 refresh token
+	if err := s.repo.CreateRefreshToken(ctx, &RefreshToken{
+		UserID: userUUID,
+		Token:  newRefreshToken,
+	}); err != nil {
+		return nil, err
+	}
+
+	return &AuthResponse{
+		UserID:       claims.Subject,
+		AccessToken:  accessToken,
+		RefreshToken: newRefreshToken,
+	}, nil
 }
