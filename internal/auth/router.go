@@ -13,14 +13,21 @@ func RegisterRoutes(r *gin.Engine, h Handler, jwtService jwt.Service) {
 		auth.POST("/register", h.Register)
 		auth.POST("/login", h.Login)
 		auth.POST("/refresh", h.RefreshToken)
+		auth.POST("/login/apple", h.AppleSignIn)
 	}
 
 	// 需要认证的路由
-	protected := r.Group("/api")
+	protected := r.Group("/auth")
 	protected.Use(middleware.AuthMiddleware(jwtService))
 	{
-		// 在这里添加需要认证的路由
-		// protected.GET("/profile", h.GetProfile)
-		// protected.PUT("/profile", h.UpdateProfile)
+		protected.DELETE("/account", h.DeleteAccount)
+	}
+
+	// API 路由
+	api := r.Group("/api")
+	api.Use(middleware.AuthMiddleware(jwtService))
+	{
+		api.GET("/profile", h.GetProfile)
+		api.PUT("/profile", h.UpdateProfile)
 	}
 }

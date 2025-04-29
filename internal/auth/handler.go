@@ -26,14 +26,13 @@ func NewHandler(s Service) *Handler {
 
 // Register godoc
 // @Summary Register a new user
-// @Description Register a new user with email, password and username
+// @Description Register a new user with email and password
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param request body RegisterRequest true "User registration details"
-// @Success 201 {object} AuthResponse
+// @Param request body RegisterRequest true "Registration data"
+// @Success 200 {object} TokenResponse
 // @Failure 400 {object} error
-// @Failure 409 {object} error
 // @Failure 500 {object} error
 // @Router /auth/register [post]
 func (h *Handler) Register(c *gin.Context) {
@@ -52,12 +51,12 @@ func (h *Handler) Register(c *gin.Context) {
 
 // Login godoc
 // @Summary Login user
-// @Description Login user with email and password
+// @Description Login with email and password
 // @Tags auth
 // @Accept json
 // @Produce json
-// @Param request body LoginRequest true "User login credentials"
-// @Success 200 {object} AuthResponse
+// @Param request body LoginRequest true "Login credentials"
+// @Success 200 {object} TokenResponse
 // @Failure 400 {object} error
 // @Failure 401 {object} error
 // @Failure 500 {object} error
@@ -82,8 +81,9 @@ func (h *Handler) Login(c *gin.Context) {
 // @Tags auth
 // @Accept json
 // @Produce json
+// @Security Bearer
 // @Param request body RefreshTokenRequest true "Refresh token"
-// @Success 200 {object} AuthResponse
+// @Success 200 {object} TokenResponse
 // @Failure 400 {object} error
 // @Failure 401 {object} error
 // @Failure 500 {object} error
@@ -97,6 +97,31 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 	resp, err := h.Service.RefreshToken(c.Request.Context(), in.RefreshToken)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+// AppleSignIn godoc
+// @Summary Sign in with Apple
+// @Description Handle Apple Sign In
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body AppleSigninRequest true "Apple Sign In data"
+// @Success 200 {object} TokenResponse
+// @Failure 400 {object} error
+// @Failure 500 {object} error
+// @Router /auth/apple/signin [post]
+func (h *Handler) AppleSignIn(c *gin.Context) {
+	var in AppleSigninRequest
+	if err := c.ShouldBindJSON(&in); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	resp, err := h.Service.AppleSignin(c.Request.Context(), in)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, resp)

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -15,7 +16,9 @@ import (
 type Service interface {
 	Register(ctx context.Context, in RegisterRequest) (*AuthResponse, error)
 	Login(ctx context.Context, in LoginRequest) (*AuthResponse, error)
+	AppleSignin(ctx context.Context, in AppleSigninRequest) (*AuthResponse, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error)
+	DeleteAccount(ctx context.Context, userID string) error
 }
 
 type service struct {
@@ -32,6 +35,7 @@ func NewService(r Repository, jwtService jwt.Service) Service {
 }
 
 func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthResponse, error) {
+	// 检查邮箱是否已被使用
 	_, err := s.repo.FindByEmail(ctx, in.Email)
 	if err == nil {
 		return nil, errors.New("email already registered")
@@ -41,23 +45,100 @@ func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthRespon
 		return nil, err
 	}
 
+	// 创建密码哈希
 	hash, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
 	}
 
+	// 创建新的账户
+	account, err := s.repo.CreateAccount(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create account: %w", err)
+	}
+
+	// 创建凭证
 	cred := &Credentials{
 		Email:        in.Email,
 		PasswordHash: string(hash),
-		UserID:       uuid.New(),
+		UserID:       account.ID,
+		Provider:     "email",
+		ProviderID:   in.Email,
 	}
 	if err := s.repo.CreateCredentials(ctx, cred); err != nil {
 		return nil, err
 	}
 
-	// 先物理删除该用户所有refresh token
-	_ = s.repo.DeleteAllUserTokens(ctx, cred.UserID.String())
+	// 处理 refresh tokens
+	if in.ClientID != "" {
+		// 如果提供了 client_id，只撤销该客户端的旧 tokens
+		_ = s.repo.RevokeClientTokens(ctx, account.ID.String(), in.ClientID)
+	} else {
+		// 如果没有提供 client_id，撤销所有 tokens（更安全的做法）
+		_ = s.repo.RevokeAllUserTokens(ctx, account.ID.String())
+	}
 
+	// 生成令牌
+	accessToken, err := s.jwtService.GenerateAccessToken(account.ID.String())
+	if err != nil {
+		return nil, err
+	}
+	refreshToken, err := s.jwtService.GenerateRefreshToken(account.ID.String())
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.CreateRefreshToken(ctx, &RefreshToken{
+		UserID:   account.ID,
+		Token:    refreshToken,
+		ClientID: in.ClientID,
+	}); err != nil {
+		return nil, err
+	}
+
+	return &AuthResponse{
+		UserID:       account.ID.String(),
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+	}, nil
+}
+
+func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, error) {
+	cred, err := s.repo.FindByEmail(ctx, in.Email)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("invalid credentials")
+		}
+		return nil, err
+	}
+
+	// 检查是否是邮箱密码登录的凭证
+	if cred.Provider != "email" || cred.PasswordHash == "" || cred.Email == "" {
+		return nil, errors.New("invalid login method")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(cred.PasswordHash), []byte(in.Password)); err != nil {
+		return nil, errors.New("invalid credentials")
+	}
+
+	// 检查账户是否已被删除
+	account, err := s.repo.FindAccountByID(ctx, cred.UserID.String())
+	if err != nil {
+		return nil, err
+	}
+	if !account.DeletedAt.IsZero() {
+		return nil, errors.New("account has been deleted")
+	}
+
+	// 处理 refresh tokens
+	if in.ClientID != "" {
+		// 如果提供了 client_id，只撤销该客户端的旧 tokens
+		_ = s.repo.RevokeClientTokens(ctx, cred.UserID.String(), in.ClientID)
+	} else {
+		// 如果没有提供 client_id，撤销所有 tokens（更安全的做法）
+		_ = s.repo.RevokeAllUserTokens(ctx, cred.UserID.String())
+	}
+
+	// 生成令牌
 	accessToken, err := s.jwtService.GenerateAccessToken(cred.UserID.String())
 	if err != nil {
 		return nil, err
@@ -67,8 +148,9 @@ func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthRespon
 		return nil, err
 	}
 	if err := s.repo.CreateRefreshToken(ctx, &RefreshToken{
-		UserID: cred.UserID,
-		Token:  refreshToken,
+		UserID:   cred.UserID,
+		Token:    refreshToken,
+		ClientID: in.ClientID,
 	}); err != nil {
 		return nil, err
 	}
@@ -80,18 +162,65 @@ func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthRespon
 	}, nil
 }
 
-func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, error) {
-	cred, err := s.repo.FindByEmail(ctx, in.Email)
-	if err != nil {
+func (s *service) AppleSignin(ctx context.Context, in AppleSigninRequest) (*AuthResponse, error) {
+	// 查找是否已存在该 Apple 用户的凭证
+	cred, err := s.repo.FindByProviderID(ctx, "apple", in.AppleUserID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(cred.PasswordHash), []byte(in.Password)); err != nil {
-		return nil, errors.New("invalid credentials")
+
+	if cred == nil {
+		// 如果不存在，先创建新账户
+		account, err := s.repo.CreateAccount(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create account: %w", err)
+		}
+
+		// 然后创建凭证
+		providerData := map[string]interface{}{
+			"first_name": in.FirstName,
+			"last_name":  in.LastName,
+		}
+		for k, v := range in.ExtraData {
+			providerData[k] = v
+		}
+
+		providerDataJSON, err := json.Marshal(providerData)
+		if err != nil {
+			return nil, err
+		}
+
+		cred = &Credentials{
+			UserID:       account.ID,
+			Email:        in.Email,
+			Provider:     "apple",
+			ProviderID:   in.AppleUserID,
+			ProviderData: providerDataJSON,
+		}
+		if err := s.repo.CreateCredentials(ctx, cred); err != nil {
+			return nil, err
+		}
+	} else {
+		// 检查账户是否已被删除
+		account, err := s.repo.FindAccountByID(ctx, cred.UserID.String())
+		if err != nil {
+			return nil, err
+		}
+		if !account.DeletedAt.IsZero() {
+			return nil, errors.New("account has been deleted")
+		}
 	}
 
-	// 先物理删除该用户所有refresh token
-	_ = s.repo.DeleteAllUserTokens(ctx, cred.UserID.String())
+	// 处理 refresh tokens
+	if in.ClientID != "" {
+		// 如果提供了 client_id，只撤销该客户端的旧 tokens
+		_ = s.repo.RevokeClientTokens(ctx, cred.UserID.String(), in.ClientID)
+	} else {
+		// 如果没有提供 client_id，撤销所有 tokens（更安全的做法）
+		_ = s.repo.RevokeAllUserTokens(ctx, cred.UserID.String())
+	}
 
+	// 生成新的 tokens
 	accessToken, err := s.jwtService.GenerateAccessToken(cred.UserID.String())
 	if err != nil {
 		return nil, err
@@ -100,9 +229,12 @@ func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, er
 	if err != nil {
 		return nil, err
 	}
+
+	// 保存新的 refresh token
 	if err := s.repo.CreateRefreshToken(ctx, &RefreshToken{
-		UserID: cred.UserID,
-		Token:  refreshToken,
+		UserID:   cred.UserID,
+		Token:    refreshToken,
+		ClientID: in.ClientID,
 	}); err != nil {
 		return nil, err
 	}
@@ -116,15 +248,20 @@ func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, er
 
 func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error) {
 	// 查找并校验 refresh token 是否有效且未撤销
-	_, err := s.repo.FindRefreshToken(ctx, refreshToken)
+	token, err := s.repo.FindRefreshToken(ctx, refreshToken)
 	if err != nil {
 		return nil, errors.New("invalid refresh token")
 	}
+	if token.Revoked {
+		return nil, errors.New("token has been revoked")
+	}
+
 	claims, err := s.jwtService.ValidateRefreshToken(refreshToken)
 	if err != nil {
 		return nil, errors.New("invalid refresh token")
 	}
 
+	// 生成新的 tokens
 	accessToken, err := s.jwtService.GenerateAccessToken(claims.Subject)
 	if err != nil {
 		return nil, err
@@ -133,16 +270,21 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 	if err != nil {
 		return nil, err
 	}
-	// 先物理删除该用户所有refresh token
+
+	// 将旧的 token 标记为已撤销
+	if err := s.repo.RevokeRefreshToken(ctx, refreshToken); err != nil {
+		return nil, err
+	}
+
+	// 创建新的 refresh token，保持相同的 client ID
 	userUUID, err := uuid.Parse(claims.Subject)
 	if err != nil {
 		return nil, err
 	}
-	_ = s.repo.DeleteAllUserTokens(ctx, userUUID.String())
-	// 存储新的 refresh token
 	if err := s.repo.CreateRefreshToken(ctx, &RefreshToken{
-		UserID: userUUID,
-		Token:  newRefreshToken,
+		UserID:   userUUID,
+		Token:    newRefreshToken,
+		ClientID: token.ClientID,
 	}); err != nil {
 		return nil, err
 	}
@@ -152,4 +294,23 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 		AccessToken:  accessToken,
 		RefreshToken: newRefreshToken,
 	}, nil
+}
+
+func (s *service) DeleteAccount(ctx context.Context, userID string) error {
+	// 撤销所有 refresh tokens
+	if err := s.repo.RevokeAllUserTokens(ctx, userID); err != nil {
+		return fmt.Errorf("failed to revoke user tokens: %w", err)
+	}
+
+	// 修改凭证表中的唯一字段
+	if err := s.repo.UpdateCredentialsOnAccountDeletion(ctx, userID); err != nil {
+		return fmt.Errorf("failed to update credentials: %w", err)
+	}
+
+	// 软删除账户
+	if err := s.repo.DeleteAccount(ctx, userID); err != nil {
+		return fmt.Errorf("failed to delete account: %w", err)
+	}
+
+	return nil
 }

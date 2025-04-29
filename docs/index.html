@@ -2,16 +2,26 @@
 <html>
   <head>
     <meta charset="utf-8"/>
-    <title>API Docs</title>
-    <script type="module" src="https://unpkg.com/rapidoc@latest/dist/rapidoc-min.js"></script>
+    <title>Balloonia API Docs</title>
+    <script type="module"
+      src="https://unpkg.com/rapidoc@latest/dist/rapidoc-min.js">
+    </script>
   </head>
   <body>
     <rapi-doc
       spec-url="/docs/api/swagger.json"
-      render-style="focused"
       theme="light"
-      allow-server-selection
-      show-info
+      show-header="true"
+      allow-authentication
+      persist-auth
     ></rapi-doc>
+    <script>
+        // once <rapi-doc> is parsed, set the bearer token:
+        document.addEventListener('DOMContentLoaded', () => {
+          const doc = document.querySelector('#apiDoc');
+          // replace YOUR_TOKEN with the actual JWT (or fetch it dynamically)
+          doc.setApiKey('BearerAuth', 'Bearer ' + YOUR_TOKEN);
+        });
+      </script>
   </body>
 </html>

@@ -1,3 +1,14 @@
+// @title        Balloonia API
+// @version      1.0
+// @description  This is the Balloonia server API documentation
+// @BasePath     /
+
+// 定义一个名为 BearerAuth 的 apiKey 安全方案
+// @securityDefinitions.apikey  BearerAuth
+// @in                          header
+// @name                        Authorization
+// @description                 Enter your bearer token in the format: Bearer <token>
+
 package main
 
 import (

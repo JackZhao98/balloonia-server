@@ -2,14 +2,25 @@ package auth
 
 import (
 	"context"
+	"fmt"
+	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 // Repository defines DB operations for credentials
 type Repository interface {
+	// Account 相关
+	CreateAccount(ctx context.Context) (*Account, error)
+	DeleteAccount(ctx context.Context, userID string) error
+	FindAccountByID(ctx context.Context, userID string) (*Account, error)
+
+	// Credentials 相关
 	CreateCredentials(ctx context.Context, cred *Credentials) error
 	FindByEmail(ctx context.Context, email string) (*Credentials, error)
+	FindByProviderID(ctx context.Context, provider, providerID string) (*Credentials, error)
+	UpdateCredentialsOnAccountDeletion(ctx context.Context, userID string) error
 
 	// refresh token 相关
 	CreateRefreshToken(ctx context.Context, token *RefreshToken) error
@@ -17,6 +28,7 @@ type Repository interface {
 	RevokeRefreshToken(ctx context.Context, token string) error
 	RevokeAllUserTokens(ctx context.Context, userID string) error
 	DeleteAllUserTokens(ctx context.Context, userID string) error
+	RevokeClientTokens(ctx context.Context, userID string, clientID string) error
 }
 
 type repository struct {
@@ -28,6 +40,14 @@ func NewRepository(db *gorm.DB) Repository {
 	return &repository{db: db}
 }
 
+func (r *repository) CreateAccount(ctx context.Context) (*Account, error) {
+	account := &Account{
+		ID: uuid.New(),
+	}
+	err := r.db.WithContext(ctx).Create(account).Error
+	return account, err
+}
+
 func (r *repository) CreateCredentials(ctx context.Context, cred *Credentials) error {
 	return r.db.WithContext(ctx).Create(cred).Error
 }
@@ -35,7 +55,20 @@ func (r *repository) CreateCredentials(ctx context.Context, cred *Credentials) e
 func (r *repository) FindByEmail(ctx context.Context, email string) (*Credentials, error) {
 	var cred Credentials
 	err := r.db.WithContext(ctx).
-		Where("email = ?", email).
+		Joins("JOIN users.account ON auth.credentials.user_id = users.account.id").
+		Where("auth.credentials.email = ? AND auth.credentials.provider = 'email' AND users.account.deleted_at IS NULL", email).
+		First(&cred).Error
+	if err != nil {
+		return nil, err
+	}
+	return &cred, nil
+}
+
+func (r *repository) FindByProviderID(ctx context.Context, provider, providerID string) (*Credentials, error) {
+	var cred Credentials
+	err := r.db.WithContext(ctx).
+		Joins("JOIN users.account ON auth.credentials.user_id = users.account.id").
+		Where("auth.credentials.provider = ? AND auth.credentials.provider_id = ? AND users.account.deleted_at IS NULL", provider, providerID).
 		First(&cred).Error
 	return &cred, err
 }
@@ -62,4 +95,53 @@ func (r *repository) RevokeAllUserTokens(ctx context.Context, userID string) err
 
 func (r *repository) DeleteAllUserTokens(ctx context.Context, userID string) error {
 	return r.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&RefreshToken{}).Error
+}
+
+func (r *repository) RevokeClientTokens(ctx context.Context, userID string, clientID string) error {
+	return r.db.WithContext(ctx).Model(&RefreshToken{}).Where("user_id = ? AND client_id = ?", userID, clientID).Update("revoked", true).Error
+}
+
+func (r *repository) DeleteAccount(ctx context.Context, userID string) error {
+	return r.db.WithContext(ctx).
+		Model(&Account{}).
+		Where("id = ?", userID).
+		Update("deleted_at", time.Now()).
+		Error
+}
+
+func (r *repository) FindAccountByID(ctx context.Context, userID string) (*Account, error) {
+	var account Account
+	err := r.db.WithContext(ctx).
+		Where("id = ?", userID).
+		First(&account).Error
+	if err != nil {
+		return nil, err
+	}
+	return &account, nil
+}
+
+func (r *repository) UpdateCredentialsOnAccountDeletion(ctx context.Context, userID string) error {
+	// 查找用户的所有凭证
+	var creds []Credentials
+	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&creds).Error; err != nil {
+		return err
+	}
+
+	// 开启事务
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, cred := range creds {
+			// 对于每个凭证，修改其唯一标识字段
+			updates := map[string]interface{}{
+				"email":       fmt.Sprintf("deleted_%s_%s", cred.Email, userID),
+				"provider_id": fmt.Sprintf("deleted_%s_%s", cred.ProviderID, userID),
+			}
+
+			if err := tx.Model(&Credentials{}).
+				Where("id = ?", cred.ID).
+				Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
