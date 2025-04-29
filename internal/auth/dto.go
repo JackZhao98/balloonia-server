@@ -42,3 +42,14 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
 	ExpiresIn    int64  `json:"expires_in" example:"3600"`
 }
+
+// RequestPasswordResetRequest represents the request to initiate password reset
+type RequestPasswordResetRequest struct {
+	Email string `json:"email" binding:"required,email" example:"user@example.com"`
+}
+
+// ResetPasswordRequest represents the request to reset password with token
+type ResetPasswordRequest struct {
+	Token       string `json:"token" binding:"required" example:"abc123def456..."`
+	NewPassword string `json:"new_password" binding:"required,min=8" example:"newpassword123"`
+}

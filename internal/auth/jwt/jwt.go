@@ -2,9 +2,12 @@ package jwt
 
 import (
 	"errors"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/JackZhao98/balloonia-server/config"
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -13,6 +16,7 @@ type Service interface {
 	GenerateRefreshToken(userID string) (string, error)
 	ValidateAccessToken(token string) (*jwt.RegisteredClaims, error)
 	ValidateRefreshToken(token string) (*jwt.RegisteredClaims, error)
+	AuthMiddleware() gin.HandlerFunc
 }
 
 type jwtService struct {
@@ -74,4 +78,33 @@ func (s *jwtService) validateToken(tokenString string, secretKey []byte) (*jwt.R
 	}
 
 	return nil, errors.New("invalid token")
+}
+
+// AuthMiddleware returns a Gin middleware for JWT authentication
+func (s *jwtService) AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		authHeader := c.GetHeader("Authorization")
+		if authHeader == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "authorization header is required"})
+			c.Abort()
+			return
+		}
+
+		parts := strings.Split(authHeader, " ")
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid authorization header format"})
+			c.Abort()
+			return
+		}
+
+		claims, err := s.ValidateAccessToken(parts[1])
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired token"})
+			c.Abort()
+			return
+		}
+
+		c.Set("userID", claims.Subject)
+		c.Next()
+	}
 }

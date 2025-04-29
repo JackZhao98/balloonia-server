@@ -29,6 +29,16 @@ type Repository interface {
 	RevokeAllUserTokens(ctx context.Context, userID string) error
 	DeleteAllUserTokens(ctx context.Context, userID string) error
 	RevokeClientTokens(ctx context.Context, userID string, clientID string) error
+
+	// Password reset methods
+	CreatePasswordResetToken(ctx context.Context, token *PasswordResetToken) error
+	GetPasswordResetToken(ctx context.Context, token string) (*PasswordResetToken, error)
+	MarkPasswordResetTokenAsUsed(ctx context.Context, tokenID string) error
+	DeleteExpiredPasswordResetTokens(ctx context.Context) error
+
+	// User methods
+	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	UpdateUserPassword(ctx context.Context, userID string, hashedPassword string) error
 }
 
 type repository struct {
@@ -144,4 +154,59 @@ func (r *repository) UpdateCredentialsOnAccountDeletion(ctx context.Context, use
 		}
 		return nil
 	})
+}
+
+// CreatePasswordResetToken creates a new password reset token
+func (r *repository) CreatePasswordResetToken(ctx context.Context, token *PasswordResetToken) error {
+	return r.db.WithContext(ctx).Create(token).Error
+}
+
+// GetPasswordResetToken retrieves a password reset token by token string
+func (r *repository) GetPasswordResetToken(ctx context.Context, token string) (*PasswordResetToken, error) {
+	var result PasswordResetToken
+	err := r.db.WithContext(ctx).
+		Where("token = ? AND used_at IS NULL AND expires_at > NOW()", token).
+		First(&result).Error
+	if err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// MarkPasswordResetTokenAsUsed marks a password reset token as used
+func (r *repository) MarkPasswordResetTokenAsUsed(ctx context.Context, tokenID string) error {
+	return r.db.WithContext(ctx).
+		Model(&PasswordResetToken{}).
+		Where("id = ?", tokenID).
+		Update("used_at", time.Now()).
+		Error
+}
+
+// DeleteExpiredPasswordResetTokens deletes all expired password reset tokens
+func (r *repository) DeleteExpiredPasswordResetTokens(ctx context.Context) error {
+	return r.db.WithContext(ctx).
+		Where("expires_at < NOW()").
+		Delete(&PasswordResetToken{}).
+		Error
+}
+
+// GetUserByEmail retrieves a user by email
+func (r *repository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	var user User
+	err := r.db.WithContext(ctx).
+		Where("email = ? AND deleted_at IS NULL", email).
+		First(&user).Error
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// UpdateUserPassword updates a user's password
+func (r *repository) UpdateUserPassword(ctx context.Context, userID string, hashedPassword string) error {
+	return r.db.WithContext(ctx).
+		Model(&User{}).
+		Where("id = ?", userID).
+		Update("password", hashedPassword).
+		Error
 }

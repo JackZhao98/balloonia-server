@@ -2,9 +2,13 @@ package auth
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"math/rand"
+	"time"
 
 	"github.com/JackZhao98/balloonia-server/internal/auth/jwt"
 	"github.com/google/uuid"
@@ -19,6 +23,8 @@ type Service interface {
 	AppleSignin(ctx context.Context, in AppleSigninRequest) (*AuthResponse, error)
 	RefreshToken(ctx context.Context, refreshToken string) (*AuthResponse, error)
 	DeleteAccount(ctx context.Context, userID string) error
+	RequestPasswordReset(ctx context.Context, email string) error
+	ResetPassword(ctx context.Context, req ResetPasswordRequest) error
 }
 
 type service struct {
@@ -313,4 +319,73 @@ func (s *service) DeleteAccount(ctx context.Context, userID string) error {
 	}
 
 	return nil
+}
+
+// RequestPasswordReset initiates the password reset process
+func (s *service) RequestPasswordReset(ctx context.Context, email string) error {
+	// 1. 查找用户
+	user, err := s.repo.GetUserByEmail(ctx, email)
+	if err != nil {
+		return fmt.Errorf("user not found")
+	}
+
+	// 2. 生成重置令牌
+	token := &PasswordResetToken{
+		ID:        uuid.New().String(),
+		UserID:    user.ID,
+		Token:     generateSecureToken(),
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+		CreatedAt: time.Now(),
+	}
+
+	// 3. 保存令牌
+	if err := s.repo.CreatePasswordResetToken(ctx, token); err != nil {
+		return fmt.Errorf("failed to create reset token: %w", err)
+	}
+
+	// 4. 发送重置邮件
+	// TODO: 实现邮件发送功能
+	log.Printf("Password reset token for user %s: %s", email, token.Token)
+
+	return nil
+}
+
+// ResetPassword resets the user's password using a valid token
+func (s *service) ResetPassword(ctx context.Context, req ResetPasswordRequest) error {
+	// 1. 验证令牌
+	token, err := s.repo.GetPasswordResetToken(ctx, req.Token)
+	if err != nil {
+		return fmt.Errorf("invalid or expired token")
+	}
+
+	// 2. 更新密码
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	if err := s.repo.UpdateUserPassword(ctx, token.UserID, string(hashedPassword)); err != nil {
+		return fmt.Errorf("failed to update password: %w", err)
+	}
+
+	// 3. 标记令牌为已使用
+	if err := s.repo.MarkPasswordResetTokenAsUsed(ctx, token.ID); err != nil {
+		log.Printf("Failed to mark token as used: %v", err)
+	}
+
+	// 4. 撤销所有现有的刷新令牌
+	if err := s.repo.DeleteAllUserTokens(ctx, token.UserID); err != nil {
+		log.Printf("Failed to revoke refresh tokens: %v", err)
+	}
+
+	return nil
+}
+
+// generateSecureToken generates a secure random token
+func generateSecureToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return uuid.New().String()
+	}
+	return base64.URLEncoding.EncodeToString(b)
 }

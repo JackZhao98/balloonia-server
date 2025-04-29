@@ -112,7 +112,7 @@ func (h *Handler) RefreshToken(c *gin.Context) {
 // @Success 200 {object} TokenResponse
 // @Failure 400 {object} error
 // @Failure 500 {object} error
-// @Router /auth/apple/signin [post]
+// @Router /auth/login/apple [post]
 func (h *Handler) AppleSignIn(c *gin.Context) {
 	var in AppleSigninRequest
 	if err := c.ShouldBindJSON(&in); err != nil {
@@ -125,4 +125,57 @@ func (h *Handler) AppleSignIn(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// RequestPasswordReset godoc
+// @Summary Request password reset
+// @Description Request a password reset token to be sent to email
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body RequestPasswordResetRequest true "Email for password reset"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} error
+// @Failure 500 {object} error
+// @Router /auth/password-reset/request [post]
+func (h *Handler) RequestPasswordReset(c *gin.Context) {
+	var req RequestPasswordResetRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.Service.RequestPasswordReset(c.Request.Context(), req.Email); err != nil {
+		// 为了安全，不返回具体错误
+		c.JSON(http.StatusOK, gin.H{"message": "如果该邮箱存在，重置密码的邮件已发送"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "如果该邮箱存在，重置密码的邮件已发送"})
+}
+
+// ResetPassword godoc
+// @Summary Reset password
+// @Description Reset password using the token received in email
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param request body ResetPasswordRequest true "Password reset data"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} error
+// @Failure 500 {object} error
+// @Router /auth/password-reset/reset [post]
+func (h *Handler) ResetPassword(c *gin.Context) {
+	var req ResetPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.Service.ResetPassword(c.Request.Context(), req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效或已过期的重置令牌"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "密码重置成功"})
 }

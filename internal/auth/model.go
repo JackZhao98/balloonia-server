@@ -51,3 +51,27 @@ type RefreshToken struct {
 func (RefreshToken) TableName() string {
 	return "auth.refresh_tokens"
 }
+
+// PasswordResetToken represents a password reset token in the database
+type PasswordResetToken struct {
+	ID        string     `db:"id"`
+	UserID    string     `db:"user_id"`
+	Token     string     `db:"token"`
+	ExpiresAt time.Time  `db:"expires_at"`
+	UsedAt    *time.Time `db:"used_at"`
+	CreatedAt time.Time  `db:"created_at"`
+}
+
+// User represents a user in the database
+type User struct {
+	ID        string     `db:"id"`
+	Email     string     `db:"email"`
+	Password  string     `db:"password"`
+	CreatedAt time.Time  `db:"created_at"`
+	UpdatedAt time.Time  `db:"updated_at"`
+	DeletedAt *time.Time `db:"deleted_at"`
+}
+
+func (User) TableName() string {
+	return "users.account"
+}
