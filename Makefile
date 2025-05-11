@@ -2,6 +2,9 @@ include .env
 
 .PHONY: build run start clean docs
 
+deploy:
+	docs build
+
 build:
 	go build -o ${BINARY} ./cmd/main.go
 
@@ -16,3 +19,4 @@ clean:
 docs:
 	rm -rf ./docs/api
 	swag init --generalInfo ./cmd/main.go --output ./docs/api
+
