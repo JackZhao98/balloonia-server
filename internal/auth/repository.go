@@ -37,7 +37,7 @@ type Repository interface {
 	DeleteExpiredPasswordResetTokens(ctx context.Context) error
 
 	// User methods
-	GetUserByEmail(ctx context.Context, email string) (*User, error)
+	GetUserByEmail(ctx context.Context, email string) (*Account, error)
 	UpdateUserPassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error
 }
 
@@ -113,10 +113,11 @@ func (r *repository) RevokeClientTokens(ctx context.Context, userID uuid.UUID, c
 }
 
 func (r *repository) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
+	now := time.Now()
 	return r.db.WithContext(ctx).
 		Model(&Account{}).
 		Where("id = ?", userID).
-		Update("deleted_at", time.Now()).
+		Update("deleted_at", &now).
 		Error
 }
 
@@ -192,22 +193,23 @@ func (r *repository) DeleteExpiredPasswordResetTokens(ctx context.Context) error
 }
 
 // GetUserByEmail retrieves a user by email
-func (r *repository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
-	var user User
+func (r *repository) GetUserByEmail(ctx context.Context, email string) (*Account, error) {
+	var account Account
 	err := r.db.WithContext(ctx).
+		Table("users.account").
 		Where("email = ? AND deleted_at IS NULL", email).
-		First(&user).Error
+		First(&account).Error
 	if err != nil {
 		return nil, err
 	}
-	return &user, nil
+	return &account, nil
 }
 
 // UpdateUserPassword updates a user's password
 func (r *repository) UpdateUserPassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
 	return r.db.WithContext(ctx).
-		Model(&User{}).
-		Where("id = ?", userID).
-		Update("password", hashedPassword).
+		Table("auth.credentials").
+		Where("user_id = ? AND provider = 'email'", userID).
+		Update("password_hash", hashedPassword).
 		Error
 }

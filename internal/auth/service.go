@@ -131,7 +131,7 @@ func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, er
 	if err != nil {
 		return nil, err
 	}
-	if !account.DeletedAt.IsZero() {
+	if account.DeletedAt != nil {
 		return nil, errors.New("account has been deleted")
 	}
 
@@ -329,7 +329,7 @@ func (s *service) DeleteAccount(ctx context.Context, userID string) error {
 // RequestPasswordReset initiates the password reset process
 func (s *service) RequestPasswordReset(ctx context.Context, email string) error {
 	// 1. 查找用户
-	user, err := s.repo.GetUserByEmail(ctx, email)
+	account, err := s.repo.GetUserByEmail(ctx, email)
 	if err != nil {
 		return fmt.Errorf("user not found")
 	}
@@ -337,7 +337,7 @@ func (s *service) RequestPasswordReset(ctx context.Context, email string) error 
 	// 2. 生成重置令牌
 	token := &PasswordResetToken{
 		ID:        uuid.New(),
-		UserID:    user.ID,
+		UserID:    account.ID,
 		Token:     generateSecureToken(),
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 		CreatedAt: time.Now(),

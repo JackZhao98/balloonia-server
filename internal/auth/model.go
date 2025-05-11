@@ -8,11 +8,11 @@ import (
 
 // Account maps to users.account table
 type Account struct {
-	ID        uuid.UUID `gorm:"type:uuid;primaryKey;column:id"`
-	Email     string    `gorm:"type:varchar(255);uniqueIndex"`
-	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
-	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
-	DeletedAt time.Time `gorm:"column:deleted_at;index"`
+	ID        uuid.UUID  `gorm:"type:uuid;primaryKey;column:id"`
+	Email     string     `gorm:"type:varchar(255);uniqueIndex"`
+	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+	DeletedAt *time.Time `gorm:"column:deleted_at;index"`
 }
 
 // TableName overrides GORM table name
