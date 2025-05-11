@@ -243,7 +243,7 @@ func (r *repository) CreateProfile(ctx context.Context, profile *Profile) error 
 func (r *repository) GetProfile(ctx context.Context, userID uuid.UUID) (*Profile, error) {
 	var profile Profile
 	err := r.db.WithContext(ctx).
-		Where("user_id = ? AND deleted_at IS NULL", userID).
+		Where("user_id = ?", userID).
 		First(&profile).Error
 	if err != nil {
 		return nil, err
@@ -255,15 +255,13 @@ func (r *repository) GetProfile(ctx context.Context, userID uuid.UUID) (*Profile
 func (r *repository) UpdateProfile(ctx context.Context, userID uuid.UUID, updates map[string]interface{}) error {
 	return r.db.WithContext(ctx).
 		Model(&Profile{}).
-		Where("user_id = ? AND deleted_at IS NULL", userID).
+		Where("user_id = ?", userID).
 		Updates(updates).Error
 }
 
-// DeleteProfile soft deletes a profile
+// DeleteProfile deletes a profile
 func (r *repository) DeleteProfile(ctx context.Context, userID uuid.UUID) error {
-	now := time.Now()
 	return r.db.WithContext(ctx).
-		Model(&Profile{}).
 		Where("user_id = ?", userID).
-		Update("deleted_at", &now).Error
+		Delete(&Profile{}).Error
 }

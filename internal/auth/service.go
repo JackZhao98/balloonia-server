@@ -25,6 +25,8 @@ type Service interface {
 	DeleteAccount(ctx context.Context, userID string) error
 	RequestPasswordReset(ctx context.Context, email string) error
 	ResetPassword(ctx context.Context, req ResetPasswordRequest) error
+	GetProfile(ctx context.Context, userID string) (*ProfileResponse, error)
+	UpdateProfile(ctx context.Context, userID string, req *ProfileUpdateRequest) (*ProfileResponse, error)
 }
 
 type service struct {
@@ -396,4 +398,100 @@ func generateSecureToken() string {
 		return uuid.New().String()
 	}
 	return base64.URLEncoding.EncodeToString(b)
+}
+
+// GetProfile retrieves a user's profile
+func (s *service) GetProfile(ctx context.Context, userID string) (*ProfileResponse, error) {
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	// 获取账户信息
+	account, err := s.repo.FindAccountByID(ctx, userUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 获取 profile 信息
+	profile, err := s.repo.GetProfile(ctx, userUUID)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	// 如果 profile 不存在，返回只包含基本信息的响应
+	response := &ProfileResponse{
+		UserID: account.ID.String(),
+		Email:  account.Email,
+	}
+
+	// 如果 profile 存在，添加 profile 信息
+	if profile != nil {
+		response.Nickname = profile.Nickname
+		response.AvatarURL = profile.AvatarURL
+		response.Bio = profile.Bio
+	}
+
+	return response, nil
+}
+
+// UpdateProfile updates a user's profile
+func (s *service) UpdateProfile(ctx context.Context, userID string, req *ProfileUpdateRequest) (*ProfileResponse, error) {
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid user ID: %w", err)
+	}
+
+	// 检查用户是否存在
+	account, err := s.repo.FindAccountByID(ctx, userUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	// 获取现有的 profile 或创建新的
+	profile, err := s.repo.GetProfile(ctx, userUUID)
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		// 如果 profile 不存在，创建新的
+		profile = &Profile{
+			UserID: userUUID,
+		}
+	}
+
+	// 更新字段（只更新非空字段）
+	updates := make(map[string]interface{})
+	if req.Nickname != nil {
+		profile.Nickname = *req.Nickname
+		updates["nickname"] = *req.Nickname
+	}
+	if req.AvatarURL != nil {
+		profile.AvatarURL = *req.AvatarURL
+		updates["avatar_url"] = *req.AvatarURL
+	}
+	if req.Bio != nil {
+		profile.Bio = *req.Bio
+		updates["bio"] = *req.Bio
+	}
+
+	// 如果是新 profile，创建它
+	if profile.CreatedAt.IsZero() {
+		err = s.repo.CreateProfile(ctx, profile)
+	} else {
+		// 否则更新现有的
+		err = s.repo.UpdateProfile(ctx, userUUID, updates)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 返回更新后的完整 profile
+	return &ProfileResponse{
+		UserID:    account.ID.String(),
+		Email:     account.Email,
+		Nickname:  profile.Nickname,
+		AvatarURL: profile.AvatarURL,
+		Bio:       profile.Bio,
+	}, nil
 }

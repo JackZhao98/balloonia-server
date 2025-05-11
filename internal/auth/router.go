@@ -24,4 +24,16 @@ func RegisterRoutes(r *gin.Engine, h Handler, jwt jwt.Service) {
 			protected.DELETE("/account", h.DeleteAccount)
 		}
 	}
+
+	// 用户相关路由
+	users := r.Group("/users")
+	{
+		// 受保护的路由
+		protected := users.Group("")
+		protected.Use(jwt.AuthMiddleware())
+		{
+			protected.GET("/profile", h.GetProfile)
+			protected.PUT("/profile", h.UpdateProfile)
+		}
+	}
 }
