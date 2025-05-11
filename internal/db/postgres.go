@@ -25,7 +25,7 @@ func ConnectDatabase() {
 		&auth.Credentials{},
 		&auth.RefreshToken{},
 		&auth.PasswordResetToken{},
-		&auth.User{},
+		&auth.Profile{},
 	); err != nil {
 		log.Fatalf("Failed to migrate database: %v", err)
 	}
@@ -76,9 +76,20 @@ func ConnectDatabase() {
 				FOREIGN KEY (user_id) REFERENCES users.account(id)
 				ON DELETE CASCADE;
 			END IF;
+
+			-- users.profile 表的外键约束
+			IF NOT EXISTS (
+				SELECT 1 FROM information_schema.table_constraints 
+				WHERE constraint_name = 'fk_profile_user_id'
+			) THEN
+				ALTER TABLE users.profile
+				ADD CONSTRAINT fk_profile_user_id
+				FOREIGN KEY (user_id) REFERENCES users.account(id)
+				ON DELETE CASCADE;
+			END IF;
 		END $$;
 	`).Error; err != nil {
-		log.Printf("Warning: Failed to add foreign key constraints: %v", err)
+		log.Fatalf("Failed to create foreign key constraints: %v", err)
 	}
 
 	DB = db

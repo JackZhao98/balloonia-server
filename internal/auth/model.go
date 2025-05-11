@@ -80,3 +80,37 @@ type User struct {
 func (User) TableName() string {
 	return "users.account"
 }
+
+// Profile maps to users.profile table
+type Profile struct {
+	UserID    uuid.UUID `gorm:"type:uuid;primaryKey;column:user_id"`
+	Nickname  string    `gorm:"size:50"`
+	AvatarURL string    `gorm:"size:255;column:avatar_url"`
+	Bio       string    `gorm:"type:text"`
+	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
+
+	// 关联
+	Account Account `gorm:"foreignKey:UserID;references:ID;constraint:OnDelete:CASCADE"`
+}
+
+// TableName overrides GORM table name
+func (Profile) TableName() string {
+	return "users.profile"
+}
+
+// ProfileResponse represents the response for profile operations
+type ProfileResponse struct {
+	UserID    string `json:"user_id"`
+	Email     string `json:"email"`
+	Nickname  string `json:"nickname,omitempty"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+	Bio       string `json:"bio,omitempty"`
+}
+
+// ProfileUpdateRequest represents the request to update profile
+type ProfileUpdateRequest struct {
+	Nickname  *string `json:"nickname,omitempty"`
+	AvatarURL *string `json:"avatar_url,omitempty"`
+	Bio       *string `json:"bio,omitempty"`
+}

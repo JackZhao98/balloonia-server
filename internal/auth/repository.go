@@ -11,6 +11,10 @@ import (
 
 // Repository defines DB operations for credentials
 type Repository interface {
+	// 事务支持
+	WithTx(tx *gorm.DB) Repository
+	Transaction(ctx context.Context, fn func(txRepo Repository) error) error
+
 	// Account 相关
 	CreateAccount(ctx context.Context, email string) (*Account, error)
 	DeleteAccount(ctx context.Context, userID uuid.UUID) error
@@ -21,6 +25,12 @@ type Repository interface {
 	FindByEmail(ctx context.Context, email string) (*Credentials, error)
 	FindByProviderID(ctx context.Context, provider, providerID string) (*Credentials, error)
 	UpdateCredentialsOnAccountDeletion(ctx context.Context, userID uuid.UUID) error
+
+	// Profile 相关
+	CreateProfile(ctx context.Context, profile *Profile) error
+	GetProfile(ctx context.Context, userID uuid.UUID) (*Profile, error)
+	UpdateProfile(ctx context.Context, userID uuid.UUID, updates map[string]interface{}) error
+	DeleteProfile(ctx context.Context, userID uuid.UUID) error
 
 	// refresh token 相关
 	CreateRefreshToken(ctx context.Context, token *RefreshToken) error
@@ -48,6 +58,16 @@ type repository struct {
 // NewRepository returns a new Auth Repository
 func NewRepository(db *gorm.DB) Repository {
 	return &repository{db: db}
+}
+
+func (r *repository) WithTx(tx *gorm.DB) Repository {
+	return &repository{db: tx}
+}
+
+func (r *repository) Transaction(ctx context.Context, fn func(txRepo Repository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(r.WithTx(tx))
+	})
 }
 
 func (r *repository) CreateAccount(ctx context.Context, email string) (*Account, error) {
@@ -212,4 +232,38 @@ func (r *repository) UpdateUserPassword(ctx context.Context, userID uuid.UUID, h
 		Where("user_id = ? AND provider = 'email'", userID).
 		Update("password_hash", hashedPassword).
 		Error
+}
+
+// CreateProfile creates a new profile
+func (r *repository) CreateProfile(ctx context.Context, profile *Profile) error {
+	return r.db.WithContext(ctx).Create(profile).Error
+}
+
+// GetProfile retrieves a profile by user ID
+func (r *repository) GetProfile(ctx context.Context, userID uuid.UUID) (*Profile, error) {
+	var profile Profile
+	err := r.db.WithContext(ctx).
+		Where("user_id = ? AND deleted_at IS NULL", userID).
+		First(&profile).Error
+	if err != nil {
+		return nil, err
+	}
+	return &profile, nil
+}
+
+// UpdateProfile updates a profile
+func (r *repository) UpdateProfile(ctx context.Context, userID uuid.UUID, updates map[string]interface{}) error {
+	return r.db.WithContext(ctx).
+		Model(&Profile{}).
+		Where("user_id = ? AND deleted_at IS NULL", userID).
+		Updates(updates).Error
+}
+
+// DeleteProfile soft deletes a profile
+func (r *repository) DeleteProfile(ctx context.Context, userID uuid.UUID) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).
+		Model(&Profile{}).
+		Where("user_id = ?", userID).
+		Update("deleted_at", &now).Error
 }

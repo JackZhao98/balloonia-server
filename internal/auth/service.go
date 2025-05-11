@@ -308,22 +308,25 @@ func (s *service) DeleteAccount(ctx context.Context, userID string) error {
 		return fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	// 撤销所有 refresh tokens
-	if err := s.repo.RevokeAllUserTokens(ctx, userUUID); err != nil {
-		return fmt.Errorf("failed to revoke user tokens: %w", err)
-	}
+	// 使用事务处理所有删除操作
+	return s.repo.Transaction(ctx, func(txRepo Repository) error {
+		// 1. 撤销所有 refresh tokens
+		if err := txRepo.RevokeAllUserTokens(ctx, userUUID); err != nil {
+			return fmt.Errorf("failed to revoke user tokens: %w", err)
+		}
 
-	// 修改凭证表中的唯一字段
-	if err := s.repo.UpdateCredentialsOnAccountDeletion(ctx, userUUID); err != nil {
-		return fmt.Errorf("failed to update credentials: %w", err)
-	}
+		// 2. 修改凭证表中的唯一字段
+		if err := txRepo.UpdateCredentialsOnAccountDeletion(ctx, userUUID); err != nil {
+			return fmt.Errorf("failed to update credentials: %w", err)
+		}
 
-	// 软删除账户
-	if err := s.repo.DeleteAccount(ctx, userUUID); err != nil {
-		return fmt.Errorf("failed to delete account: %w", err)
-	}
+		// 3. 软删除账户（profile 会通过 ON DELETE CASCADE 自动删除）
+		if err := txRepo.DeleteAccount(ctx, userUUID); err != nil {
+			return fmt.Errorf("failed to delete account: %w", err)
+		}
 
-	return nil
+		return nil
+	})
 }
 
 // RequestPasswordReset initiates the password reset process
