@@ -6,15 +6,15 @@ deploy:
 	docs build
 
 build:
-	go build -o ${BINARY} ./cmd/main.go
+	go build -o ./build/${BINARY} ./cmd/main.go
 
 run:
-	./${BINARY}
+	.build/${BINARY}
 
 start: build run
 
 clean:
-	rm -f ${BINARY}
+	rm -df ./build
 
 docs:
 	rm -rf ./docs/api
