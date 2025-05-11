@@ -2,8 +2,7 @@ include .env
 
 .PHONY: build run start clean docs
 
-deploy:
-	docs build
+deploy:	docs build
 
 build:
 	go build -o ./build/${BINARY} ./cmd/main.go
