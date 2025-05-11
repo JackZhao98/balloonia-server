@@ -12,33 +12,33 @@ import (
 // Repository defines DB operations for credentials
 type Repository interface {
 	// Account 相关
-	CreateAccount(ctx context.Context) (*Account, error)
-	DeleteAccount(ctx context.Context, userID string) error
-	FindAccountByID(ctx context.Context, userID string) (*Account, error)
+	CreateAccount(ctx context.Context, email string) (*Account, error)
+	DeleteAccount(ctx context.Context, userID uuid.UUID) error
+	FindAccountByID(ctx context.Context, userID uuid.UUID) (*Account, error)
 
 	// Credentials 相关
 	CreateCredentials(ctx context.Context, cred *Credentials) error
 	FindByEmail(ctx context.Context, email string) (*Credentials, error)
 	FindByProviderID(ctx context.Context, provider, providerID string) (*Credentials, error)
-	UpdateCredentialsOnAccountDeletion(ctx context.Context, userID string) error
+	UpdateCredentialsOnAccountDeletion(ctx context.Context, userID uuid.UUID) error
 
 	// refresh token 相关
 	CreateRefreshToken(ctx context.Context, token *RefreshToken) error
 	FindRefreshToken(ctx context.Context, token string) (*RefreshToken, error)
 	RevokeRefreshToken(ctx context.Context, token string) error
-	RevokeAllUserTokens(ctx context.Context, userID string) error
-	DeleteAllUserTokens(ctx context.Context, userID string) error
-	RevokeClientTokens(ctx context.Context, userID string, clientID string) error
+	RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error
+	DeleteAllUserTokens(ctx context.Context, userID uuid.UUID) error
+	RevokeClientTokens(ctx context.Context, userID uuid.UUID, clientID string) error
 
 	// Password reset methods
 	CreatePasswordResetToken(ctx context.Context, token *PasswordResetToken) error
 	GetPasswordResetToken(ctx context.Context, token string) (*PasswordResetToken, error)
-	MarkPasswordResetTokenAsUsed(ctx context.Context, tokenID string) error
+	MarkPasswordResetTokenAsUsed(ctx context.Context, tokenID uuid.UUID) error
 	DeleteExpiredPasswordResetTokens(ctx context.Context) error
 
 	// User methods
 	GetUserByEmail(ctx context.Context, email string) (*User, error)
-	UpdateUserPassword(ctx context.Context, userID string, hashedPassword string) error
+	UpdateUserPassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error
 }
 
 type repository struct {
@@ -50,9 +50,10 @@ func NewRepository(db *gorm.DB) Repository {
 	return &repository{db: db}
 }
 
-func (r *repository) CreateAccount(ctx context.Context) (*Account, error) {
+func (r *repository) CreateAccount(ctx context.Context, email string) (*Account, error) {
 	account := &Account{
-		ID: uuid.New(),
+		ID:    uuid.New(),
+		Email: email,
 	}
 	err := r.db.WithContext(ctx).Create(account).Error
 	return account, err
@@ -65,8 +66,8 @@ func (r *repository) CreateCredentials(ctx context.Context, cred *Credentials) e
 func (r *repository) FindByEmail(ctx context.Context, email string) (*Credentials, error) {
 	var cred Credentials
 	err := r.db.WithContext(ctx).
-		Joins("JOIN users.account ON auth.credentials.user_id = users.account.id").
-		Where("auth.credentials.email = ? AND auth.credentials.provider = 'email' AND users.account.deleted_at IS NULL", email).
+		Table("auth.credentials").
+		Where("email = ? AND provider = 'email'", email).
 		First(&cred).Error
 	if err != nil {
 		return nil, err
@@ -99,19 +100,19 @@ func (r *repository) RevokeRefreshToken(ctx context.Context, token string) error
 	return r.db.WithContext(ctx).Model(&RefreshToken{}).Where("token = ?", token).Update("revoked", true).Error
 }
 
-func (r *repository) RevokeAllUserTokens(ctx context.Context, userID string) error {
+func (r *repository) RevokeAllUserTokens(ctx context.Context, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).Model(&RefreshToken{}).Where("user_id = ?", userID).Update("revoked", true).Error
 }
 
-func (r *repository) DeleteAllUserTokens(ctx context.Context, userID string) error {
+func (r *repository) DeleteAllUserTokens(ctx context.Context, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).Where("user_id = ?", userID).Delete(&RefreshToken{}).Error
 }
 
-func (r *repository) RevokeClientTokens(ctx context.Context, userID string, clientID string) error {
+func (r *repository) RevokeClientTokens(ctx context.Context, userID uuid.UUID, clientID string) error {
 	return r.db.WithContext(ctx).Model(&RefreshToken{}).Where("user_id = ? AND client_id = ?", userID, clientID).Update("revoked", true).Error
 }
 
-func (r *repository) DeleteAccount(ctx context.Context, userID string) error {
+func (r *repository) DeleteAccount(ctx context.Context, userID uuid.UUID) error {
 	return r.db.WithContext(ctx).
 		Model(&Account{}).
 		Where("id = ?", userID).
@@ -119,7 +120,7 @@ func (r *repository) DeleteAccount(ctx context.Context, userID string) error {
 		Error
 }
 
-func (r *repository) FindAccountByID(ctx context.Context, userID string) (*Account, error) {
+func (r *repository) FindAccountByID(ctx context.Context, userID uuid.UUID) (*Account, error) {
 	var account Account
 	err := r.db.WithContext(ctx).
 		Where("id = ?", userID).
@@ -130,7 +131,7 @@ func (r *repository) FindAccountByID(ctx context.Context, userID string) (*Accou
 	return &account, nil
 }
 
-func (r *repository) UpdateCredentialsOnAccountDeletion(ctx context.Context, userID string) error {
+func (r *repository) UpdateCredentialsOnAccountDeletion(ctx context.Context, userID uuid.UUID) error {
 	// 查找用户的所有凭证
 	var creds []Credentials
 	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).Find(&creds).Error; err != nil {
@@ -174,7 +175,7 @@ func (r *repository) GetPasswordResetToken(ctx context.Context, token string) (*
 }
 
 // MarkPasswordResetTokenAsUsed marks a password reset token as used
-func (r *repository) MarkPasswordResetTokenAsUsed(ctx context.Context, tokenID string) error {
+func (r *repository) MarkPasswordResetTokenAsUsed(ctx context.Context, tokenID uuid.UUID) error {
 	return r.db.WithContext(ctx).
 		Model(&PasswordResetToken{}).
 		Where("id = ?", tokenID).
@@ -203,7 +204,7 @@ func (r *repository) GetUserByEmail(ctx context.Context, email string) (*User, e
 }
 
 // UpdateUserPassword updates a user's password
-func (r *repository) UpdateUserPassword(ctx context.Context, userID string, hashedPassword string) error {
+func (r *repository) UpdateUserPassword(ctx context.Context, userID uuid.UUID, hashedPassword string) error {
 	return r.db.WithContext(ctx).
 		Model(&User{}).
 		Where("id = ?", userID).

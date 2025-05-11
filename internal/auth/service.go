@@ -58,7 +58,7 @@ func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthRespon
 	}
 
 	// 创建新的账户
-	account, err := s.repo.CreateAccount(ctx)
+	account, err := s.repo.CreateAccount(ctx, in.Email)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create account: %w", err)
 	}
@@ -78,10 +78,10 @@ func (s *service) Register(ctx context.Context, in RegisterRequest) (*AuthRespon
 	// 处理 refresh tokens
 	if in.ClientID != "" {
 		// 如果提供了 client_id，只撤销该客户端的旧 tokens
-		_ = s.repo.RevokeClientTokens(ctx, account.ID.String(), in.ClientID)
+		_ = s.repo.RevokeClientTokens(ctx, account.ID, in.ClientID)
 	} else {
 		// 如果没有提供 client_id，撤销所有 tokens（更安全的做法）
-		_ = s.repo.RevokeAllUserTokens(ctx, account.ID.String())
+		_ = s.repo.RevokeAllUserTokens(ctx, account.ID)
 	}
 
 	// 生成令牌
@@ -127,7 +127,7 @@ func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, er
 	}
 
 	// 检查账户是否已被删除
-	account, err := s.repo.FindAccountByID(ctx, cred.UserID.String())
+	account, err := s.repo.FindAccountByID(ctx, cred.UserID)
 	if err != nil {
 		return nil, err
 	}
@@ -138,10 +138,10 @@ func (s *service) Login(ctx context.Context, in LoginRequest) (*AuthResponse, er
 	// 处理 refresh tokens
 	if in.ClientID != "" {
 		// 如果提供了 client_id，只撤销该客户端的旧 tokens
-		_ = s.repo.RevokeClientTokens(ctx, cred.UserID.String(), in.ClientID)
+		_ = s.repo.RevokeClientTokens(ctx, cred.UserID, in.ClientID)
 	} else {
 		// 如果没有提供 client_id，撤销所有 tokens（更安全的做法）
-		_ = s.repo.RevokeAllUserTokens(ctx, cred.UserID.String())
+		_ = s.repo.RevokeAllUserTokens(ctx, cred.UserID)
 	}
 
 	// 生成令牌
@@ -177,7 +177,7 @@ func (s *service) AppleSignin(ctx context.Context, in AppleSigninRequest) (*Auth
 
 	if cred == nil {
 		// 如果不存在，先创建新账户
-		account, err := s.repo.CreateAccount(ctx)
+		account, err := s.repo.CreateAccount(ctx, in.Email)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create account: %w", err)
 		}
@@ -208,7 +208,7 @@ func (s *service) AppleSignin(ctx context.Context, in AppleSigninRequest) (*Auth
 		}
 	} else {
 		// 检查账户是否已被删除
-		account, err := s.repo.FindAccountByID(ctx, cred.UserID.String())
+		account, err := s.repo.FindAccountByID(ctx, cred.UserID)
 		if err != nil {
 			return nil, err
 		}
@@ -220,10 +220,10 @@ func (s *service) AppleSignin(ctx context.Context, in AppleSigninRequest) (*Auth
 	// 处理 refresh tokens
 	if in.ClientID != "" {
 		// 如果提供了 client_id，只撤销该客户端的旧 tokens
-		_ = s.repo.RevokeClientTokens(ctx, cred.UserID.String(), in.ClientID)
+		_ = s.repo.RevokeClientTokens(ctx, cred.UserID, in.ClientID)
 	} else {
 		// 如果没有提供 client_id，撤销所有 tokens（更安全的做法）
-		_ = s.repo.RevokeAllUserTokens(ctx, cred.UserID.String())
+		_ = s.repo.RevokeAllUserTokens(ctx, cred.UserID)
 	}
 
 	// 生成新的 tokens
@@ -303,18 +303,23 @@ func (s *service) RefreshToken(ctx context.Context, refreshToken string) (*AuthR
 }
 
 func (s *service) DeleteAccount(ctx context.Context, userID string) error {
+	userUUID, err := uuid.Parse(userID)
+	if err != nil {
+		return fmt.Errorf("invalid user ID: %w", err)
+	}
+
 	// 撤销所有 refresh tokens
-	if err := s.repo.RevokeAllUserTokens(ctx, userID); err != nil {
+	if err := s.repo.RevokeAllUserTokens(ctx, userUUID); err != nil {
 		return fmt.Errorf("failed to revoke user tokens: %w", err)
 	}
 
 	// 修改凭证表中的唯一字段
-	if err := s.repo.UpdateCredentialsOnAccountDeletion(ctx, userID); err != nil {
+	if err := s.repo.UpdateCredentialsOnAccountDeletion(ctx, userUUID); err != nil {
 		return fmt.Errorf("failed to update credentials: %w", err)
 	}
 
 	// 软删除账户
-	if err := s.repo.DeleteAccount(ctx, userID); err != nil {
+	if err := s.repo.DeleteAccount(ctx, userUUID); err != nil {
 		return fmt.Errorf("failed to delete account: %w", err)
 	}
 
@@ -331,7 +336,7 @@ func (s *service) RequestPasswordReset(ctx context.Context, email string) error 
 
 	// 2. 生成重置令牌
 	token := &PasswordResetToken{
-		ID:        uuid.New().String(),
+		ID:        uuid.New(),
 		UserID:    user.ID,
 		Token:     generateSecureToken(),
 		ExpiresAt: time.Now().Add(24 * time.Hour),

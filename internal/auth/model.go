@@ -9,6 +9,7 @@ import (
 // Account maps to users.account table
 type Account struct {
 	ID        uuid.UUID `gorm:"type:uuid;primaryKey;column:id"`
+	Email     string    `gorm:"type:varchar(255);uniqueIndex"`
 	CreatedAt time.Time `gorm:"column:created_at;autoCreateTime"`
 	UpdatedAt time.Time `gorm:"column:updated_at;autoUpdateTime"`
 	DeletedAt time.Time `gorm:"column:deleted_at;index"`
@@ -21,8 +22,8 @@ func (Account) TableName() string {
 
 // Credentials maps to auth.credentials table
 type Credentials struct {
-	ID           uint      `gorm:"primaryKey;column:id"`
-	UserID       uuid.UUID `gorm:"type:uuid;column:user_id;uniqueIndex"`
+	ID           int64     `gorm:"primaryKey;column:id;autoIncrement"`
+	UserID       uuid.UUID `gorm:"type:uuid;column:user_id;not null"`
 	Email        string    `gorm:"size:255;uniqueIndex"`
 	PasswordHash string    `gorm:"type:text;not null;column:password_hash"`
 	Provider     string    `gorm:"size:50;not null;default:'email'"`
@@ -54,22 +55,26 @@ func (RefreshToken) TableName() string {
 
 // PasswordResetToken represents a password reset token in the database
 type PasswordResetToken struct {
-	ID        string     `db:"id"`
-	UserID    string     `db:"user_id"`
-	Token     string     `db:"token"`
-	ExpiresAt time.Time  `db:"expires_at"`
-	UsedAt    *time.Time `db:"used_at"`
-	CreatedAt time.Time  `db:"created_at"`
+	ID        uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	UserID    uuid.UUID  `gorm:"type:uuid;not null"`
+	Token     string     `gorm:"type:text;not null"`
+	ExpiresAt time.Time  `gorm:"not null"`
+	UsedAt    *time.Time `gorm:"default:null"`
+	CreatedAt time.Time  `gorm:"not null;default:CURRENT_TIMESTAMP"`
+}
+
+// TableName overrides GORM table name
+func (PasswordResetToken) TableName() string {
+	return "auth.password_reset_tokens"
 }
 
 // User represents a user in the database
 type User struct {
-	ID        string     `db:"id"`
-	Email     string     `db:"email"`
-	Password  string     `db:"password"`
-	CreatedAt time.Time  `db:"created_at"`
-	UpdatedAt time.Time  `db:"updated_at"`
-	DeletedAt *time.Time `db:"deleted_at"`
+	ID        uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	Email     string     `gorm:"size:255;uniqueIndex"`
+	CreatedAt time.Time  `gorm:"column:created_at;autoCreateTime"`
+	UpdatedAt time.Time  `gorm:"column:updated_at;autoUpdateTime"`
+	DeletedAt *time.Time `gorm:"column:deleted_at;index"`
 }
 
 func (User) TableName() string {
